@@ -1,4 +1,4 @@
-// index.js
+// ======================= Keep-alive (Replit/Render 用) =======================
 import http from 'http';
 const PORT = process.env.PORT || 3000;
 http
@@ -8,6 +8,7 @@ http
   })
   .listen(PORT, () => console.log(`🌐 Keep-alive server running on :${PORT}`));
 
+// ============================== Imports & Setup ==============================
 import 'dotenv/config';
 import {
   Client, GatewayIntentBits, Partials, Routes,
@@ -24,7 +25,7 @@ import fs from 'fs';
 dayjs.extend(utc);
 dayjs.extend(tz);
 
-/** ===================== Config ===================== **/
+// ================================ Config ====================================
 const {
   DISCORD_TOKEN, CLIENT_ID, GUILD_ID,
   CRON_HOUR = '9',
@@ -33,23 +34,23 @@ const {
   GOOGLE_SHEETS_ENABLED = 'true',
 } = process.env;
 
-// 如要「完全不依賴 Google Sheets」→ 設 true
+// Set true = 完全停用 Sheets（最穩陣）；false = 如設定齊就會寫到 Sheets
 const FORCE_SAFE_MODE = false;
 
-// Sheets helper（可選）
 const SHEETS_ENABLED = GOOGLE_SHEETS_ENABLED === 'true' && !FORCE_SAFE_MODE;
 let sheetHelper = null;
 if (SHEETS_ENABLED) {
   try {
     const mod = await import('./sheets/googleSheets.js');
     sheetHelper = mod.default;
+    console.log('🧾 Google Sheets helper loaded.');
   } catch (e) {
     console.warn('⚠️ Sheets helper 載入失敗，將不使用 Sheets：', e?.message || e);
   }
 }
 const hasSheets = () => !!sheetHelper && SHEETS_ENABLED;
 
-/** ===================== DB 初始化 ===================== **/
+// =============================== Database ===================================
 if (!fs.existsSync('db')) fs.mkdirSync('db');
 const db = new Database('db/polls.db');
 db.exec(`
@@ -77,7 +78,7 @@ CREATE TABLE IF NOT EXISTS votes (
 );
 `);
 
-/** ===================== 題庫（本地後備） ===================== **/
+// ============================ Local Question Bank ===========================
 let questions = [];
 try {
   questions = JSON.parse(fs.readFileSync('./questions.json', 'utf-8'));
@@ -87,15 +88,16 @@ try {
     { a: '聽歌', b: '追劇', tag: 'entertainment' },
     { a: '搭叮叮', b: '搭小巴', tag: 'transport' },
   ];
+  fs.writeFileSync('./questions.json', JSON.stringify(questions, null, 2));
 }
 
-/** ===================== Discord Client ===================== **/
+// ============================== Discord Client ==============================
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
   partials: [Partials.Channel]
 });
 
-/** ===================== Slash Commands ===================== **/
+// =========================== Slash Commands (v14) ===========================
 const commands = [
   new SlashCommandBuilder()
     .setName('set-channel')
@@ -105,7 +107,7 @@ const commands = [
 
   new SlashCommandBuilder().setName('poll-now').setDescription('立即隨機出一題 2選1 投票'),
 
-  new SlashCommandBuilder().setName('reload-questions').setDescription('重新載入題庫（Sheets 啟用時從雲端讀取）'),
+  new SlashCommandBuilder().setName('reload-questions').setDescription('重新載入題庫（有開 Sheets 就會從雲端同步）'),
 
   new SlashCommandBuilder()
     .setName('add-question')
@@ -119,15 +121,11 @@ const commands = [
 
 const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
 async function registerCommands() {
-  try {
-    await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
-    console.log('✅ Slash commands registered.');
-  } catch (error) {
-    console.error('❌ Command register error:', error);
-  }
+  await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
+  console.log('✅ Slash commands registered.');
 }
 
-/** ===================== Utils ===================== **/
+// ================================ Helpers ===================================
 const pct = (n) => `${(n * 100).toFixed(1)}%`;
 const nowHK = () => dayjs().tz(TIMEZONE).toISOString();
 
@@ -154,7 +152,7 @@ function getActivePollByMessage(messageId) {
   return db.prepare('SELECT * FROM polls WHERE message_id = ? AND is_active = 1').get(messageId);
 }
 
-/** 顯示「即時/最終結果」的 Embed（含題目與選項） **/
+// 顯示結果（含題目與選項）
 function buildResultsEmbed(poll, stats, { final = false } = {}) {
   const title = final ? '最終結果' : '即時結果';
   const endAt = dayjs(poll.end_at).tz(TIMEZONE).format('YYYY年MM月DD日 HH:mm z');
@@ -191,37 +189,35 @@ async function pickQuestion() {
 }
 
 async function refreshMessage(message, poll) {
-  try {
-    const { a, b, aPct, bPct } = tally(poll.id);
-    const endAt = dayjs(poll.end_at).tz(TIMEZONE);
+  const { a, b, aPct, bPct } = tally(poll.id);
+  const endAt = dayjs(poll.end_at).tz(TIMEZONE);
 
-    const embed = new EmbedBuilder()
-      .setTitle('每日 2選1 投票')
-      .setDescription(`**A. ${poll.question_a}**\n**B. ${poll.question_b}**`)
-      .addFields(
-        { name: '投票狀態', value: `A：${a}（${pct(aPct)}）\nB：${b}（${pct(bPct)}）` },
-        { name: '截止時間', value: endAt.format('YYYY年MM月DD日 HH:mm z') }
-      )
-      .setFooter({ text: '匿名投票｜每人限投一次（可更改選擇）' })
-      .setTimestamp(new Date())
-      .setColor(0x5865F2);
+  const embed = new EmbedBuilder()
+    .setTitle('每日 2選1 投票')
+    .setDescription(`**A. ${poll.question_a}**\n**B. ${poll.question_b}**`)
+    .addFields(
+      { name: '投票狀態', value: `A：${a}（${pct(aPct)}）\nB：${b}（${pct(bPct)}）` },
+      { name: '截止時間', value: endAt.format('YYYY年MM月DD日 HH:mm z') }
+    )
+    .setFooter({ text: '匿名投票｜每人限投一次（可更改選擇）' })
+    .setTimestamp(new Date())
+    .setColor(0x5865F2);
 
-    await message.edit({ embeds: [embed] });
-  } catch (error) {
-    console.error('refreshMessage error:', error);
+  await message.edit({ embeds: [embed] });
+}
+
+async function ensureCanPostTo(channel) {
+  const me = await channel.guild.members.fetch(client.user.id);
+  const perms = channel.permissionsFor(me);
+  if (!perms?.has(['SendMessages', 'EmbedLinks'])) {
+    throw new Error(`Missing channel permissions: SendMessages, EmbedLinks in #${channel.name} (${channel.id})`);
   }
 }
 
 async function postPoll(channelId, qA, qB, tag, durationMins = 1440) {
   const channel = await client.channels.fetch(channelId);
   if (!channel) throw new Error('Channel not found');
-
-  // 確認權限：SendMessages + EmbedLinks
-  const me = await channel.guild.members.fetch(client.user.id);
-  const perms = channel.permissionsFor(me);
-  if (!perms?.has(['SendMessages', 'EmbedLinks'])) {
-    throw new Error(`Missing channel permissions: SendMessages, EmbedLinks in ${channel.name} (${channel.id})`);
-  }
+  await ensureCanPostTo(channel);
 
   const endAt = dayjs().tz(TIMEZONE).add(durationMins, 'minute');
 
@@ -252,7 +248,7 @@ async function postPoll(channelId, qA, qB, tag, durationMins = 1440) {
     nowHK(), endAt.toISOString()
   );
 
-  // 可選：記錄到 Sheets（以免阻塞，做 soft 方式）
+  // Optional Sheets log (soft timeout)
   if (hasSheets()) {
     try {
       const pollId = db.prepare('SELECT id FROM polls WHERE message_id = ?').get(msg.id)?.id;
@@ -285,19 +281,19 @@ async function closeExpiredPolls() {
         const channel = await client.channels.fetch(p.channel_id);
         const msg = await channel.messages.fetch(p.message_id);
 
-        // 原投票卡：改 footer & 移除按鈕
+        // 關閉原卡
         const embed = EmbedBuilder.from(msg.embeds[0])
           .setFooter({ text: '投票已結束（匿名）' })
           .setColor(0x99AAB5);
         await msg.edit({ embeds: [embed], components: [] });
 
-        // 公佈最終結果（題目 + 選項）
+        // 公佈最終結果（包含題目與選項）
         const stats = tally(p.id);
         const finalEmbed = buildResultsEmbed(p, stats, { final: true });
         await channel.send({ embeds: [finalEmbed] });
 
-        // Sheets 紀錄
-        if (hasSheets())) {
+        // Sheets log
+        if (hasSheets()) {
           try {
             const startTime = dayjs(p.start_at).tz(TIMEZONE);
             const endTime = dayjs().tz(TIMEZONE);
@@ -326,7 +322,7 @@ async function closeExpiredPolls() {
   }
 }
 
-/** ===================== Ready ===================== **/
+// ================================= Ready ====================================
 client.once('ready', async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
   await registerCommands();
@@ -349,8 +345,9 @@ client.once('ready', async () => {
   console.log(`📅 Daily poll scheduled: ${cronExp} (${TIMEZONE})`);
 });
 
-/** ===================== Interactions ===================== **/
+// ============================== Interactions ================================
 client.on('interactionCreate', async (i) => {
+  // 一律快速 ACK，避免「此交互失敗」
   const safeDeferReply = async () => {
     try { if (!i.deferred && !i.replied) await i.deferReply({ ephemeral: true }); } catch {}
   };
@@ -363,7 +360,7 @@ client.on('interactionCreate', async (i) => {
   };
 
   try {
-    // ----- Buttons -----
+    // --------------------------- Buttons ---------------------------
     if (i.isButton()) {
       await safeDeferReply();
 
@@ -373,6 +370,7 @@ client.on('interactionCreate', async (i) => {
 
         const choice = i.customId === 'vote_A' ? 'A' : 'B';
 
+        // DB upsert（同步、極快）
         try {
           db.prepare(`
             INSERT INTO votes (poll_id, user_id, choice, voted_at)
@@ -389,7 +387,7 @@ client.on('interactionCreate', async (i) => {
         // 更新投票卡片
         try { await refreshMessage(i.message, poll); } catch (e) { console.error('refreshMessage:', e); }
 
-        // Sheets 記錄（非阻塞）
+        // 非阻塞記錄到 Sheets
         if (hasSheets()) {
           try {
             const t = tally(poll.id);
@@ -424,7 +422,7 @@ client.on('interactionCreate', async (i) => {
       return;
     }
 
-    // ----- Slash commands -----
+    // ------------------------ Slash Commands -----------------------
     if (!i.isChatInputCommand()) return;
     await safeDeferReply();
 
@@ -438,6 +436,7 @@ client.on('interactionCreate', async (i) => {
     if (i.commandName === 'poll-now') {
       try {
         const channelId = getSetting('poll_channel_id') || i.channelId;
+        await ensureCanPostTo(await client.channels.fetch(channelId));
         const q = await pickQuestion();
         await postPoll(channelId, q.a, q.b, q.tag, 1440);
         await safeEditReply({ content: '✅ 已發佈一條即時投票（24 小時）。' });
@@ -478,7 +477,7 @@ client.on('interactionCreate', async (i) => {
         questions.push({ a, b, tag });
         try { fs.writeFileSync('./questions.json', JSON.stringify(questions, null, 2)); } catch {}
       }
-      await safeEditReply({ content: `✅ 已加入題目：A. ${a} | B. ${b}${tag ? `（tag: ${tag}）` : ''}` });
+      await safeEditReply({ content: `✅ 已加入題目：A. ${a}｜B. ${b}${tag ? `（tag: ${tag}）` : ''}` });
       return;
     }
 
@@ -497,7 +496,7 @@ client.on('interactionCreate', async (i) => {
   }
 });
 
-/** ===================== Errors ===================== **/
+// ================================= Errors ===================================
 client.on('error', e => console.error('Discord client error:', e));
 process.on('unhandledRejection', e => console.error('Unhandled rejection:', e));
 client.on('shardDisconnect', (e, id) => console.warn('[GW] shardDisconnect', id, e?.code));
@@ -505,5 +504,5 @@ client.on('shardError', (e, id) => console.error('[GW] shardError', id, e?.messa
 client.on('shardReconnecting', id => console.warn('[GW] shardReconnecting', id));
 client.on('shardResume', (id, replayed) => console.warn('[GW] shardResume', id, 'replayed:', replayed));
 
-/** ===================== Login ===================== **/
+// ================================= Login ====================================
 client.login(DISCORD_TOKEN);
