@@ -1,0 +1,6 @@
+{
+  "watch": ["index.js", "sheets"],
+  "ext": "js,json",
+  "ignore": ["db/*", "questions.json"],
+  "exec": "node index.js"
+}
